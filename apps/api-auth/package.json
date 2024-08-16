@@ -1,0 +1,7 @@
+{
+  "name": "@spiny/auth",
+  "private": true,
+  "scripts": {
+    "dev": "make watch"
+  }
+}
