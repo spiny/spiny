@@ -300,6 +300,87 @@ Required manifest fields:
 
 The manifest is derived from `catalogs`, `catalog_indexes`, and document relationships. It is not a separate local source of truth in v1.
 
+## Catalog export/import archive
+
+A catalog can be exported to, and imported from, a single ZIP archive: the "Export catalog" action in catalog settings and the "Import catalog" action in the catalog-list action menu. The archive is the portable, on-disk form of a catalog and shares its layout with the Google Drive remote layout (issue #4), so the two stay interchangeable.
+
+### Archive layout
+
+```
+manifest.json
+relationships.json
+documents/
+  {documentId}.md
+  ...
+```
+
+`manifest.json` is an envelope describing the catalog and its documents. It extends the provider-neutral `spiny.catalog.v1` manifest above with an export envelope (`schema`, `exportedAt`), full catalog timestamps, and per-document `createdAt` and relative `path`:
+
+```json
+{
+  "schema": "spiny.catalog-archive.v1",
+  "exportedAt": "2026-01-01T00:00:00.000Z",
+  "catalog": {
+    "id": "...",
+    "title": "...",
+    "description": "...",
+    "createdAt": "...",
+    "updatedAt": "..."
+  },
+  "settings": { "documentCount": 0 },
+  "documents": [
+    {
+      "documentId": "...",
+      "title": "...",
+      "topics": ["..."],
+      "createdAt": "...",
+      "updatedAt": "...",
+      "deletedAt": null,
+      "linkedDocumentIds": ["..."],
+      "path": "documents/{documentId}.md"
+    }
+  ]
+}
+```
+
+`relationships.json` is a snapshot of the `document_relationships` rows for the catalog:
+
+```json
+{
+  "schema": "spiny.catalog-relationships.v1",
+  "catalogId": "...",
+  "relationships": [
+    {
+      "catalogId": "...",
+      "sourceDocumentId": "...",
+      "targetDocumentId": "...",
+      "relationshipType": "link",
+      "relationshipSource": "markdown_link",
+      "createdAt": "...",
+      "updatedAt": "..."
+    }
+  ]
+}
+```
+
+`documents/{documentId}.md` holds one file per ACTIVE (non-deleted) document, containing only the raw `body_markdown`. Document metadata lives in `manifest.json`; the `.md` files carry only the body, so bodies stay clean, diff-friendly Markdown and metadata keeps a single source of truth.
+
+### Security: what is never exported
+
+- Exported: catalog metadata, non-secret settings, document metadata, document Markdown bodies, and the derived relationship rows.
+- Never exported: `active_sync_connection_id`, anything in `sync_connections` or `sync_credentials`, and OAuth tokens or other secrets. An archive contains only local catalog/document content plus non-secret metadata.
+
+### Import behavior
+
+- Import always creates a NEW local catalog with a fresh catalog id; it never overwrites an existing catalog.
+- Each document keeps its original id when that id is not already present locally, which preserves `spiny://document/{id}` body links and relationships. If an id already exists locally (a global PRIMARY KEY collision, e.g. re-importing the same archive), the document is assigned a fresh id and every `spiny://document/{old}` link in the imported bodies is rewritten to the new id, so no existing document is overwritten.
+- Documents are inserted with `applyRemoteDocument`, which rebuilds the catalog index and `document_relationships` from each Markdown body. Because relationships are rebuilt from bodies (the documented source of truth), `relationships.json` does not need to be replayed to restore links. After all documents are inserted, relationships are rebuilt once more so links whose target document was inserted later also resolve.
+
+### Save target
+
+- Android: the Storage Access Framework (from `expo-file-system/legacy`) prompts the user for a destination directory, then `createFileAsync` plus `writeAsStringAsync` (Base64 encoding) write the ZIP.
+- iOS / web: the Storage Access Framework is unavailable, so the archive is written into the app document directory and the resulting path is surfaced to the user.
+
 ## Search requirements
 
 Minimum v1 search:

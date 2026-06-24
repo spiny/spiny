@@ -449,4 +449,53 @@ export async function applyRemoteDocument(
   });
 }
 
+// ---- Import support (catalog archive, issue #2) ----
+
+/**
+ * Return the subset of `ids` that already exist as document rows in ANY state
+ * (including tombstoned). Used by catalog import to detect id collisions before
+ * insert, because `documents.id` is a global PRIMARY KEY.
+ */
+export async function filterExistingDocumentIds(
+  db: SQLiteDatabase,
+  ids: string[]
+): Promise<Set<string>> {
+  const existing = new Set<string>();
+  if (ids.length === 0) return existing;
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = await db.getAllAsync<{ id: string }>(
+    `SELECT id FROM documents WHERE id IN (${placeholders})`,
+    ...ids
+  );
+  for (const r of rows) existing.add(r.id);
+  return existing;
+}
+
+/**
+ * Rebuild link relationships for every active document in a catalog from their
+ * Markdown bodies. Used after a bulk import: a single-pass insert cannot resolve
+ * a link whose target document is inserted later, so this re-derives the full
+ * graph once all documents exist. Bodies remain the source of truth for
+ * relationships (technical/storage.md).
+ */
+export async function rebuildCatalogRelationships(
+  db: SQLiteDatabase,
+  catalogId: string
+): Promise<void> {
+  const rows = await db.getAllAsync<DocumentRow>(
+    'SELECT * FROM documents WHERE catalog_id = ? AND deleted_at IS NULL',
+    catalogId
+  );
+  await db.withTransactionAsync(async () => {
+    for (const row of rows) {
+      await rebuildRelationshipsForSource(
+        db,
+        catalogId,
+        row.id,
+        extractLinkedDocumentIds(row.body_markdown)
+      );
+    }
+  });
+}
+
 export { rowToDocument };

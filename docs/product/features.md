@@ -49,6 +49,7 @@ Required content/actions:
 - Simple list of catalogs.
 - Back home.
 - Create new catalog.
+- Import a catalog from an archive. Create and import are presented in a floating action menu (see [Storage](../technical/storage.md): "Catalog export/import archive").
 
 ### Catalog settings
 
@@ -61,6 +62,7 @@ Required content/actions:
 - Current sync provider, if any.
 - Connect/disconnect provider action.
 - Provider switching must preserve local data.
+- Export the catalog to a portable archive (see [Storage](../technical/storage.md): "Catalog export/import archive").
 
 ### Search
 
@@ -174,6 +176,7 @@ Required fields:
 | --- | --- | --- |
 | Local catalog storage | Functional | SQLite |
 | Local document storage | Functional | SQLite |
+| Catalog export/import | Functional | Portable ZIP archive; non-secret local content only; shares layout with Drive remote |
 | Home recent list | Functional | Active catalog only |
 | Markdown editing | Functional | Text editor plus preview; 64 KB byte limit on body |
 | Markdown helper toolbar | Functional | Bold, italic, headings, horizontal rule, document link, external link |
