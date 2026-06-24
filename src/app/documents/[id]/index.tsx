@@ -5,6 +5,7 @@ import {
   AppState,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -43,12 +44,14 @@ import {
   AppHeader,
   Button,
   DocumentRow,
+  Icon,
   IconButton,
   Screen,
   SegmentedControl,
   Sheet,
   SyncStatusPill,
   TextField,
+  type IconName,
 } from '@/ui/components';
 import { MarkdownToolbar } from '@/ui/editor/MarkdownToolbar';
 import { NavigationStrip } from '@/ui/editor/NavigationStrip';
@@ -71,7 +74,7 @@ function goBackSafe() {
 type SaveStatus = 'saved' | 'saving' | 'unsaved';
 
 export default function DocumentEditorScreen() {
-  const params = useLocalSearchParams<{ id: string; from?: string; fromDoc?: string }>();
+  const params = useLocalSearchParams<{ id: string; from?: string; fromDoc?: string; fresh?: string }>();
   const id = params.id;
   const db = useDatabase();
   const t = useT();
@@ -85,6 +88,10 @@ export default function DocumentEditorScreen() {
   const [topics, setTopics] = useState('');
   const [body, setBody] = useState('');
   const [mode, setMode] = useState<'edit' | 'preview'>('edit');
+  // A freshly-created document (flagged via params.fresh from documents/new) opens
+  // in edit mode; an existing document opens in read mode (technical/editor.md).
+  const [viewMode, setViewMode] = useState<'read' | 'edit'>(params.fresh === '1' ? 'edit' : 'read');
+  const [menuOpen, setMenuOpen] = useState(false);
   const [selection, setSelection] = useState<Selection>({ start: 0, end: 0 });
   const [status, setStatus] = useState<SaveStatus>('saved');
   const [related, setRelated] = useState<RelatedDocument[]>([]);
@@ -309,6 +316,17 @@ export default function DocumentEditorScreen() {
     openDocument(documentId, 'document_link');
   };
 
+  const onToggleViewMode = () => {
+    setMenuOpen(false);
+    if (viewMode === 'read') {
+      // Entering edit mode always restores the Edit/Preview sub-mode to 'edit'.
+      setMode('edit');
+      setViewMode('edit');
+    } else {
+      setViewMode('read');
+    }
+  };
+
   const onDelete = () => {
     Alert.alert(t('editor.deleteConfirm.title'), t('editor.deleteConfirm.body'), [
       { text: t('common.cancel'), style: 'cancel' },
@@ -344,6 +362,10 @@ export default function DocumentEditorScreen() {
   const statusLabel =
     status === 'saving' ? t('editor.status.saving') : status === 'unsaved' ? t('editor.status.unsaved') : t('editor.status.saved');
 
+  // The source editor (toolbar + TextInput) only shows in edit mode with the
+  // 'edit' sub-mode selected; read mode and the 'preview' sub-mode render the preview.
+  const showSourceEditor = viewMode === 'edit' && mode === 'edit';
+
   return (
     <Screen edges={['top', 'left', 'right', 'bottom']}>
       <AppHeader
@@ -351,10 +373,9 @@ export default function DocumentEditorScreen() {
         onBack={goBackSafe}
         right={
           <IconButton
-            name="trash-outline"
-            onPress={onDelete}
-            accessibilityLabel={t('editor.delete')}
-            color={theme.colors.danger}
+            name="ellipsis-horizontal"
+            onPress={() => setMenuOpen(true)}
+            accessibilityLabel={t('a11y.documentMenu')}
           />
         }
       />
@@ -363,6 +384,7 @@ export default function DocumentEditorScreen() {
         <TextInput
           value={title}
           onChangeText={onChangeTitle}
+          editable={viewMode === 'edit'}
           placeholder={t('editor.titlePlaceholder')}
           placeholderTextColor={theme.colors.textMuted}
           style={[styles.titleInput, { color: theme.colors.text }]}
@@ -371,6 +393,7 @@ export default function DocumentEditorScreen() {
         <TextInput
           value={topics}
           onChangeText={onChangeTopics}
+          editable={viewMode === 'edit'}
           placeholder={t('editor.topicsPlaceholder')}
           placeholderTextColor={theme.colors.textMuted}
           autoCapitalize="none"
@@ -386,7 +409,7 @@ export default function DocumentEditorScreen() {
           </View>
         ) : null}
 
-        {mode === 'edit' ? (
+        {showSourceEditor ? (
           <>
             <MarkdownToolbar
               onBold={() => applyEdit(applyWrap(latest.current.body, selRef.current, '**', t('toolbar.placeholder.bold')))}
@@ -429,16 +452,18 @@ export default function DocumentEditorScreen() {
       </KeyboardAvoidingView>
 
       <View style={[styles.footerRow, { borderTopColor: theme.colors.border, backgroundColor: theme.colors.background }]}>
-        <View style={styles.segment}>
-          <SegmentedControl<'edit' | 'preview'>
-            value={mode}
-            onChange={setMode}
-            options={[
-              { value: 'edit', label: t('editor.tab.edit') },
-              { value: 'preview', label: t('editor.tab.preview') },
-            ]}
-          />
-        </View>
+        {viewMode === 'edit' ? (
+          <View style={styles.segment}>
+            <SegmentedControl<'edit' | 'preview'>
+              value={mode}
+              onChange={setMode}
+              options={[
+                { value: 'edit', label: t('editor.tab.edit') },
+                { value: 'preview', label: t('editor.tab.preview') },
+              ]}
+            />
+          </View>
+        ) : null}
         <View style={styles.statusGroup}>
           <Text style={[styles.statusText, { color: theme.colors.textMuted }]}>{statusLabel}</Text>
           <SyncStatusPill catalogId={doc?.catalogId ?? null} hasProvider={!!doc && catalogHasProvider} dirty={!!doc?.dirty} />
@@ -508,7 +533,51 @@ export default function DocumentEditorScreen() {
           <Button label={t('common.add')} onPress={confirmExternalLink} fullWidth icon="link-outline" />
         </View>
       </Sheet>
+
+      {/* Document overflow menu (mode toggle, delete; extensible for future actions). */}
+      <Sheet visible={menuOpen} onClose={() => setMenuOpen(false)} title={t('editor.menu.title')}>
+        <MenuRow
+          icon={viewMode === 'read' ? 'create-outline' : 'eye-outline'}
+          label={viewMode === 'read' ? t('editor.menu.enterEdit') : t('editor.menu.enterRead')}
+          onPress={onToggleViewMode}
+        />
+        <MenuRow
+          icon="trash-outline"
+          label={t('editor.delete')}
+          destructive
+          onPress={() => {
+            setMenuOpen(false);
+            onDelete();
+          }}
+        />
+      </Sheet>
     </Screen>
+  );
+}
+
+function MenuRow({
+  icon,
+  label,
+  onPress,
+  destructive,
+}: {
+  icon: IconName;
+  label: string;
+  onPress: () => void;
+  destructive?: boolean;
+}) {
+  const theme = useTheme();
+  const color = destructive ? theme.colors.danger : theme.colors.text;
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={({ pressed }) => [styles.menuRow, { opacity: pressed ? 0.6 : 1 }]}
+    >
+      <Icon name={icon} size={22} color={color} />
+      <Text style={[styles.menuLabel, { color }]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -538,4 +607,6 @@ const styles = StyleSheet.create({
   linkRow: { marginBottom: 8 },
   emptyLink: { fontSize: 14, paddingVertical: 16, textAlign: 'center' },
   externalForm: { gap: 12, paddingBottom: 8 },
+  menuRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14 },
+  menuLabel: { fontSize: 16, fontWeight: '500' },
 });

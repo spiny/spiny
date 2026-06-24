@@ -92,6 +92,9 @@ export const en = {
   'editor.navigation.empty': 'No related documents yet.',
   'editor.navigation.expand': 'Open navigation',
   'editor.link.notFound': 'That document could not be found.',
+  'editor.menu.title': 'Document',
+  'editor.menu.enterEdit': 'Edit mode',
+  'editor.menu.enterRead': 'Read mode',
 
   'toolbar.bold': 'Bold',
   'toolbar.italic': 'Italic',
@@ -220,6 +223,7 @@ export const en = {
   'a11y.syncStatus': 'Sync status',
   'a11y.themeOption': 'Theme option',
   'a11y.languageOption': 'Language option',
+  'a11y.documentMenu': 'Document menu',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -309,6 +313,9 @@ export const fr: Messages = {
   'editor.navigation.empty': 'Aucun document lié pour l’instant.',
   'editor.navigation.expand': 'Ouvrir la navigation',
   'editor.link.notFound': 'Ce document est introuvable.',
+  'editor.menu.title': 'Document',
+  'editor.menu.enterEdit': 'Mode édition',
+  'editor.menu.enterRead': 'Mode lecture',
 
   'toolbar.bold': 'Gras',
   'toolbar.italic': 'Italique',
@@ -437,6 +444,7 @@ export const fr: Messages = {
   'a11y.syncStatus': 'État de synchronisation',
   'a11y.themeOption': 'Option de thème',
   'a11y.languageOption': 'Option de langue',
+  'a11y.documentMenu': 'Menu du document',
 };
 
 export const catalogs = { en, fr };

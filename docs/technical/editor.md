@@ -28,7 +28,7 @@ Requirements:
 
 Required regions:
 
-1. Header: back action, delete action, sync/status indicator when relevant.
+1. Header: back action, an overflow (`⋯`) menu, and a sync/status indicator when relevant. The overflow menu hosts the read/edit mode toggle and the delete action, and is designed to host future document actions (for example, AI enhancements).
 2. Title input.
 3. Topics/tags input.
 4. Markdown helper toolbar.
@@ -36,6 +36,20 @@ Required regions:
 6. Document navigation surface.
 7. Preview mode.
 8. Autosave status, if useful and non-intrusive.
+
+## View modes (read and edit)
+
+A document is shown in one of two top-level view modes, mirroring the separate edit and read experiences described in the Obsidian reference check above.
+
+- **Read mode** renders the document through the in-app Markdown preview and is read-only. It hides the Markdown helper toolbar and the Edit/Preview control, and does not accept edits to the title, topics, or body.
+- **Edit mode** is the editing experience: editable title, topics, and Markdown body inputs, the Markdown helper toolbar, and the Edit/Preview segmented control. The control's `preview` sub-mode renders the same preview without leaving edit mode.
+
+Default mode rule:
+
+- A newly created document opens in **edit mode** (quick capture, UC-04). The new-document route flags the freshly created draft so the editor can pick this initial mode.
+- An existing document opens in **read mode**.
+- The header overflow menu toggles between read and edit mode. Entering edit mode restores the Edit/Preview control to its `edit` sub-mode.
+- Read mode does not trigger autosave because it exposes no editable inputs; an empty document still renders gracefully (the preview shows the body placeholder).
 
 ## Markdown source editor requirements
 
@@ -171,6 +185,9 @@ Do not promise these in v1:
 - Wikilinks, embeds, callouts, or properties.
 - CodeMirror extension compatibility.
 - WYSIWYG editing.
+- AI-assisted document actions (for example, summarize, rewrite, or enrich).
+
+The editor header overflow menu (read/edit toggle and delete) is the planned host for future document actions such as AI-assisted enhancements, so adding them does not require new header chrome.
 
 If richer editing becomes a target, create a technical spike comparing:
 
