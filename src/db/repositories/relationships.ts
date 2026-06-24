@@ -2,7 +2,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { parseTopics } from '@/domain/markdown';
 import { nowIso } from '@/domain/time';
-import type { DocumentSummary, RelatedDocument } from '../types';
+import type { DocumentRelationshipRow, DocumentSummary, RelatedDocument } from '../types';
 
 /**
  * Rebuild outgoing `link` relationships for a source document from its parsed
@@ -148,4 +148,23 @@ export async function listRelatedDocumentsInCatalog(
     topics: parseTopics(r.topics_json),
     updatedAt: r.updated_at,
   }));
+}
+
+/**
+ * All relationship rows for a catalog, for catalog export (issue #2). Returns the
+ * raw rows ordered deterministically. Relationships are rebuilt from Markdown
+ * bodies on import, so this is an informational snapshot of the derived graph.
+ */
+export async function listRelationshipsForCatalog(
+  db: SQLiteDatabase,
+  catalogId: string
+): Promise<DocumentRelationshipRow[]> {
+  return db.getAllAsync<DocumentRelationshipRow>(
+    `SELECT catalog_id, source_document_id, target_document_id,
+            relationship_type, relationship_source, created_at, updated_at
+       FROM document_relationships
+      WHERE catalog_id = ?
+      ORDER BY source_document_id, target_document_id`,
+    catalogId
+  );
 }

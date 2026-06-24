@@ -4,6 +4,7 @@ import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { Catalogs, SyncConnections, type Catalog, type SyncConnection } from '@/db';
 import type { ProviderType } from '@/db/types';
+import { CatalogTransferError, exportCatalogArchive } from '@/export';
 import type { MessageKey } from '@/i18n';
 import { useDatabase, useSettings, useT, useTheme, useToast } from '@/state';
 import { catalogSyncService } from '@/sync';
@@ -35,6 +36,14 @@ function providerLabel(t: (k: MessageKey) => string, type: ProviderType): string
   return t(`providers.${type}` as MessageKey);
 }
 
+function exportErrorKey(error: unknown): MessageKey {
+  if (error instanceof CatalogTransferError) {
+    if (error.code === 'permission_denied') return 'catalogSettings.export.permissionDenied';
+    if (error.code === 'catalog_not_found') return 'error.catalogNotFound';
+  }
+  return 'catalogSettings.export.failed';
+}
+
 export default function CatalogSettingsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const db = useDatabase();
@@ -48,6 +57,7 @@ export default function CatalogSettingsScreen() {
   const [description, setDescription] = useState('');
   const [connections, setConnections] = useState<SyncConnection[]>([]);
   const [connectOpen, setConnectOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
     const cat = await Catalogs.getCatalog(db, id);
@@ -86,6 +96,22 @@ export default function CatalogSettingsScreen() {
     catalogSyncService.cancelCatalog(id);
     await Catalogs.setActiveSyncConnection(db, id, null);
     await load();
+  };
+
+  const onExport = async () => {
+    setExporting(true);
+    try {
+      const result = await exportCatalogArchive(db, id);
+      if (result.location === 'app_directory') {
+        showToast(t('catalogSettings.export.savedToApp', { path: result.uri }), 'success');
+      } else {
+        showToast(t('catalogSettings.export.saved', { name: result.fileName }), 'success');
+      }
+    } catch (error) {
+      showToast(t(exportErrorKey(error)), 'error');
+    } finally {
+      setExporting(false);
+    }
   };
 
   const onDelete = () => {
@@ -184,6 +210,17 @@ export default function CatalogSettingsScreen() {
             )}
           </View>
         </Card>
+      </View>
+
+      <View style={styles.section}>
+        <Button
+          label={t('catalogSettings.export.button')}
+          onPress={onExport}
+          variant="secondary"
+          icon="archive-outline"
+          loading={exporting}
+          fullWidth
+        />
       </View>
 
       <View style={styles.section}>
