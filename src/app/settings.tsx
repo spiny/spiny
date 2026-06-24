@@ -1,12 +1,11 @@
 import Constants from 'expo-constants';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { SyncConnections, type SyncConnection } from '@/db';
 import type { ProviderType } from '@/db/types';
-import type { MessageKey } from '@/i18n';
-import type { LocaleSetting } from '@/i18n';
+import type { LocaleSetting, MessageKey } from '@/i18n';
 import {
   useDatabase,
   useSettings,
@@ -15,7 +14,15 @@ import {
   useToast,
   type ThemeSetting,
 } from '@/state';
-import { authorizeGoogleDrive, createProvider, type ProviderStatus } from '@/sync';
+import {
+  authorizeGoogleDrive,
+  createGoogleDriveFolder,
+  createProvider,
+  isGoogleDriveConfigured,
+  listGoogleDriveFolders,
+  type DriveFolder,
+  type ProviderStatus,
+} from '@/sync';
 import {
   AppHeader,
   Badge,
@@ -54,6 +61,12 @@ const AI_PROVIDERS: { key: string; labelKey: MessageKey; icon: IconName; tone: B
   { key: 'openai', labelKey: 'assistant.openai', icon: 'sparkles-outline', tone: 'warning', statusKey: 'assistant.status.needsSetup' },
 ];
 
+/** Read a non-secret string field from a stored connection config. */
+function configString(config: Record<string, unknown>, key: string): string {
+  const value = config[key];
+  return typeof value === 'string' ? value : '';
+}
+
 export default function SettingsScreen() {
   const db = useDatabase();
   const t = useT();
@@ -67,10 +80,11 @@ export default function SettingsScreen() {
   const [addOpen, setAddOpen] = useState(false);
   const [addType, setAddType] = useState<ProviderType | null>(null);
   const [label, setLabel] = useState('');
-  const [clientId, setClientId] = useState('');
   const [host, setHost] = useState('');
+  const [creating, setCreating] = useState(false);
 
   const [manage, setManage] = useState<SyncConnection | null>(null);
+  const [browseConn, setBrowseConn] = useState<SyncConnection | null>(null);
 
   const load = useCallback(async () => {
     const conns = await SyncConnections.listConnections(db);
@@ -95,44 +109,86 @@ export default function SettingsScreen() {
   const resetAdd = () => {
     setAddType(null);
     setLabel('');
-    setClientId('');
     setHost('');
   };
 
   const createConn = async () => {
     if (!addType) return;
     const finalLabel = label.trim() || t(`providers.${addType}` as MessageKey);
-    const config =
-      addType === 'google_drive'
-        ? { clientId: clientId.trim() }
-        : { host: host.trim() };
-    const conn = await SyncConnections.createConnection(db, {
+
+    if (addType === 'google_drive') {
+      if (!isGoogleDriveConfigured()) {
+        showToast(t('providers.googleDrive.notConfigured'), 'error');
+        return;
+      }
+      setCreating(true);
+      try {
+        // Create the connection, then immediately run OAuth and let the user
+        // pick a target folder (issue #4).
+        const conn = await SyncConnections.createConnection(db, {
+          providerType: 'google_drive',
+          label: finalLabel,
+          config: {},
+        });
+        setAddOpen(false);
+        resetAdd();
+        const ok = await authorizeGoogleDrive(conn.id);
+        if (ok) {
+          setBrowseConn(conn);
+        } else {
+          showToast(t('providers.googleDrive.authCancelled'), 'error');
+          setManage(conn);
+        }
+      } catch {
+        showToast(t('error.generic'), 'error');
+      } finally {
+        setCreating(false);
+        await load();
+      }
+      return;
+    }
+
+    // SSH/SFTP and FTP: store metadata only (validation pending, C-06).
+    await SyncConnections.createConnection(db, {
       providerType: addType,
       label: finalLabel,
-      config,
+      config: { host: host.trim() },
     });
     setAddOpen(false);
     resetAdd();
     await load();
-    if (addType === 'google_drive') setManage(conn);
   };
 
-  const connectGoogle = async (conn: SyncConnection) => {
-    const cid = typeof conn.config.clientId === 'string' ? conn.config.clientId : '';
-    if (!cid) {
-      showToast(t('providers.googleDrive.help'), 'error');
+  const reconnectGoogle = async (conn: SyncConnection) => {
+    if (!isGoogleDriveConfigured()) {
+      showToast(t('providers.googleDrive.notConfigured'), 'error');
       return;
     }
     try {
-      const ok = await authorizeGoogleDrive(conn.id, cid);
+      const ok = await authorizeGoogleDrive(conn.id);
       if (ok) {
         showToast(t('providers.googleDrive.connected'), 'success');
         await load();
-        setManage(null);
       }
     } catch {
       showToast(t('error.generic'), 'error');
     }
+  };
+
+  const openFolderBrowser = (conn: SyncConnection) => {
+    setManage(null);
+    setBrowseConn(conn);
+  };
+
+  const saveTargetFolder = async (conn: SyncConnection, folder: DriveFolder, path: string) => {
+    await SyncConnections.updateConnectionConfig(db, conn.id, {
+      targetFolderId: folder.id,
+      targetFolderName: folder.name,
+      targetFolderPath: path,
+    });
+    setBrowseConn(null);
+    showToast(t('providers.googleDrive.folderSaved'), 'success');
+    await load();
   };
 
   const removeConn = (conn: SyncConnection) => {
@@ -249,7 +305,7 @@ export default function SettingsScreen() {
       <View style={styles.section}>
         <SectionHeader title={t('settings.about')} />
         <Text style={[styles.note, { color: theme.colors.textMuted }]}>
-          {t('settings.version', { version: Constants.expoConfig?.version ?? '1.0.0' })}
+          {t('settings.version', { version: Constants.expoConfig?.version ?? '1.0.0-dev' })}
         </Text>
       </View>
 
@@ -278,19 +334,16 @@ export default function SettingsScreen() {
               placeholder={t('providers.add.labelPlaceholder')}
             />
             {addType === 'google_drive' ? (
-              <>
-                <TextField
-                  label={t('providers.googleDrive.clientId')}
-                  value={clientId}
-                  onChangeText={setClientId}
-                  placeholder={t('providers.googleDrive.clientIdPlaceholder')}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-                <Text style={[styles.note, { color: theme.colors.textMuted }]}>
-                  {t('providers.googleDrive.help')}
-                </Text>
-              </>
+              <Text
+                style={[
+                  styles.note,
+                  { color: isGoogleDriveConfigured() ? theme.colors.textMuted : theme.colors.warning },
+                ]}
+              >
+                {isGoogleDriveConfigured()
+                  ? t('providers.googleDrive.addHint')
+                  : t('providers.googleDrive.notConfigured')}
+              </Text>
             ) : (
               <>
                 <TextField label="Host" value={host} onChangeText={setHost} placeholder="host:port" autoCapitalize="none" />
@@ -301,7 +354,11 @@ export default function SettingsScreen() {
             )}
             <View style={styles.formActions}>
               <Button label={t('common.back')} onPress={() => setAddType(null)} variant="ghost" />
-              <Button label={t('common.create')} onPress={createConn} />
+              <Button
+                label={addType === 'google_drive' ? t('providers.googleDrive.createConnect') : t('common.create')}
+                onPress={createConn}
+                loading={creating}
+              />
             </View>
           </View>
         )}
@@ -315,12 +372,30 @@ export default function SettingsScreen() {
               {t(`providers.${manage.providerType}` as MessageKey)}
             </Text>
             {manage.providerType === 'google_drive' ? (
-              <Button
-                label={t('providers.googleDrive.connect')}
-                onPress={() => connectGoogle(manage)}
-                icon="logo-google"
-                variant="secondary"
-              />
+              <>
+                <Text style={[styles.note, { color: theme.colors.textSecondary }]}>
+                  {configString(manage.config, 'targetFolderId')
+                    ? t('providers.googleDrive.targetFolder', {
+                        folder:
+                          configString(manage.config, 'targetFolderPath') ||
+                          configString(manage.config, 'targetFolderName') ||
+                          t('providers.googleDrive.myDrive'),
+                      })
+                    : t('providers.googleDrive.noFolder')}
+                </Text>
+                <Button
+                  label={t('providers.googleDrive.connect')}
+                  onPress={() => reconnectGoogle(manage)}
+                  icon="logo-google"
+                  variant="secondary"
+                />
+                <Button
+                  label={t('providers.googleDrive.chooseFolderAction')}
+                  onPress={() => openFolderBrowser(manage)}
+                  icon="folder-outline"
+                  variant="secondary"
+                />
+              </>
             ) : (
               <Text style={[styles.note, { color: theme.colors.warning }]}>
                 {t(manage.providerType === 'sftp' ? 'providers.feasibility.sftp' : 'providers.feasibility.ftp')}
@@ -335,7 +410,180 @@ export default function SettingsScreen() {
           </View>
         ) : null}
       </Sheet>
+
+      {/* Google Drive folder browser */}
+      <Sheet
+        visible={!!browseConn}
+        onClose={() => setBrowseConn(null)}
+        title={t('providers.googleDrive.folderTitle')}
+      >
+        {browseConn ? (
+          <GoogleDriveFolderBrowser
+            connection={browseConn}
+            onClose={() => setBrowseConn(null)}
+            onConfirm={(folder, path) => void saveTargetFolder(browseConn, folder, path)}
+          />
+        ) : null}
+      </Sheet>
     </Screen>
+  );
+}
+
+/**
+ * Drive folder navigator (issue #4): lists child folders under the current
+ * parent, lets the user enter subfolders, go up, create a folder, and confirm
+ * the current folder as the sync target. `root` represents My Drive.
+ */
+function GoogleDriveFolderBrowser({
+  connection,
+  onConfirm,
+  onClose,
+}: {
+  connection: SyncConnection;
+  onConfirm: (folder: DriveFolder, path: string) => void;
+  onClose: () => void;
+}) {
+  const t = useT();
+  const theme = useTheme();
+  const { showToast } = useToast();
+
+  const [stack, setStack] = useState<DriveFolder[]>([]);
+  const [folders, setFolders] = useState<DriveFolder[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const rootName = t('providers.googleDrive.myDrive');
+  const currentId = stack.length > 0 ? stack[stack.length - 1].id : 'root';
+  const currentFolder: DriveFolder =
+    stack.length > 0 ? stack[stack.length - 1] : { id: 'root', name: rootName };
+  const pathLabel = [rootName, ...stack.map((s) => s.name)].join(' / ');
+
+  // Navigation sets `loading` before changing the parent so the spinner shows.
+  const enterFolder = (folder: DriveFolder) => {
+    setLoading(true);
+    setStack((s) => [...s, folder]);
+  };
+  const goUp = () => {
+    setLoading(true);
+    setStack((s) => s.slice(0, -1));
+  };
+
+  // Fetch folders for the current parent. The work is deferred into a scheduled
+  // callback so no setState runs synchronously in the effect body
+  // (react-hooks/set-state-in-effect); this mirrors the debounced-search effect.
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const list = await listGoogleDriveFolders(connection, currentId);
+        if (!cancelled) {
+          setFolders(list);
+          setError(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setFolders([]);
+          setError(true);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [connection, currentId]);
+
+  const createSub = async () => {
+    const name = newName.trim();
+    if (!name) return;
+    setBusy(true);
+    try {
+      const created = await createGoogleDriveFolder(connection, currentId, name);
+      setNewName('');
+      setFolders((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+    } catch {
+      showToast(t('providers.googleDrive.createFolderError'), 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <View style={styles.form}>
+      <Text style={[styles.note, { color: theme.colors.textSecondary }]}>
+        {t('providers.googleDrive.chooseFolder')}
+      </Text>
+
+      <View style={styles.browseBar}>
+        <Button
+          label={t('common.back')}
+          onPress={goUp}
+          variant="ghost"
+          icon="arrow-up"
+          disabled={stack.length === 0 || busy}
+        />
+        <Text style={[styles.browsePath, { color: theme.colors.textMuted }]} numberOfLines={1}>
+          {pathLabel}
+        </Text>
+      </View>
+
+      {loading ? (
+        <ActivityIndicator color={theme.colors.primary} style={styles.browseLoading} />
+      ) : (
+        <ScrollView style={styles.browseList} keyboardShouldPersistTaps="handled">
+          {error ? (
+            <Text style={[styles.note, { color: theme.colors.danger }]}>
+              {t('providers.googleDrive.browseError')}
+            </Text>
+          ) : folders.length === 0 ? (
+            <Text style={[styles.note, { color: theme.colors.textMuted }]}>
+              {t('providers.googleDrive.noSubfolders')}
+            </Text>
+          ) : (
+            folders.map((f) => (
+              <Card key={f.id} onPress={() => enterFolder(f)} accessibilityLabel={f.name}>
+                <View style={styles.connRow}>
+                  <Icon name="folder-outline" size={20} color={theme.colors.text} />
+                  <Text style={[styles.connLabel, { color: theme.colors.text, flex: 1 }]} numberOfLines={1}>
+                    {f.name}
+                  </Text>
+                  <Icon name="chevron-forward" size={18} color={theme.colors.textMuted} />
+                </View>
+              </Card>
+            ))
+          )}
+        </ScrollView>
+      )}
+
+      <View style={styles.browseCreate}>
+        <TextField
+          containerStyle={styles.browseCreateField}
+          value={newName}
+          onChangeText={setNewName}
+          placeholder={t('providers.googleDrive.newFolderPlaceholder')}
+        />
+        <Button
+          label={t('common.add')}
+          onPress={createSub}
+          icon="add"
+          variant="secondary"
+          loading={busy}
+        />
+      </View>
+
+      <View style={styles.formActions}>
+        <Button label={t('common.cancel')} onPress={onClose} variant="ghost" />
+        <Button
+          label={t('providers.googleDrive.useFolder')}
+          onPress={() => onConfirm(currentFolder, pathLabel)}
+          icon="checkmark"
+        />
+      </View>
+    </View>
   );
 }
 
@@ -351,4 +599,10 @@ const styles = StyleSheet.create({
   connType: { fontSize: 12 },
   form: { gap: 12, paddingBottom: 8 },
   formActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8 },
+  browseBar: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  browsePath: { flex: 1, fontSize: 12 },
+  browseList: { maxHeight: 260 },
+  browseLoading: { paddingVertical: 24 },
+  browseCreate: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
+  browseCreateField: { flex: 1 },
 });

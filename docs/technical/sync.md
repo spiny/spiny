@@ -195,16 +195,121 @@ Implementation path:
 
 - Use OAuth 2.0 native/installed app flow with PKCE.
 - Use Expo `AuthSession` or a provider-specific native library that is validated in a development build.
-- Use least-privilege Google Drive scopes.
-- Prefer app-private Drive storage where appropriate, such as `appDataFolder`, if it matches the desired user visibility.
 - Upload/download/list files through Drive REST APIs.
 - Store OAuth tokens in `expo-secure-store`.
 
+### App-level public client id (issue #4)
+
+The user no longer enters an OAuth client id. The connector reads a single
+build-configured client id from app config:
+`Constants.expoConfig?.extra?.googleDriveClientId` (set in `app.json` under
+`expo.extra.googleDriveClientId`).
+
+- Per Google's "OAuth 2.0 for Mobile & Desktop Apps", a native client id used
+  with PKCE is a **public identifier, not a secret**. No client *secret* is ever
+  bundled, so constraint C-07 ("no bundled secrets") still holds.
+- The repo ships the value **empty**. Distributors must register their own
+  Google OAuth client (Android + iOS native client) and set it for their build.
+- If the value is empty/unset, the UI surfaces a clear translated message
+  ("Google Drive isn't configured for this build") instead of attempting OAuth.
+- A legacy per-connection `config.clientId` is still read as a backward-compatible
+  fallback for connections created before this change.
+
+### OAuth scope and the least-privilege tradeoff (issue #4)
+
+Issue #4 requires the user to **navigate their real Drive folders** to choose a
+target, and then to create/read/update Spiny's files inside that folder. The
+scope is chosen against the official Google Drive scopes documentation
+(<https://developers.google.com/workspace/drive/api/guides/api-specific-auth>):
+
+| Scope | Sensitivity | Can browse existing folders over REST? | Can write into a chosen pre-existing folder? |
+| --- | --- | --- | --- |
+| `drive.appdata` (previous) | Non-sensitive | No (hidden app storage only) | No |
+| `drive.file` | Non-sensitive | No — only files the app created or the user opened via the Google Picker | Limited to app-touched files |
+| `drive` | Restricted | Yes | Yes |
+
+`drive.file` cannot enumerate arbitrary pre-existing folders with a REST
+`files.list` parent query, and Spiny implements a custom REST folder browser
+rather than the web-only Google Picker. The **minimal single scope** that
+genuinely supports both requirements is therefore the restricted
+`https://www.googleapis.com/auth/drive` ("View and manage all your Drive
+files"). Google lists note-taking apps under the qualifying "Productivity and
+education" category for restricted-scope use; restricted scopes require OAuth app
+verification, and a security assessment only applies when restricted-scope data
+is stored/transmitted on servers — Spiny is local-first and stores nothing on a
+backend.
+
+**Least-privilege tradeoff:** `drive` is broad (full Drive access). The
+narrower alternative would be `drive.file` combined with the Google Picker API,
+but the Picker is a web/JavaScript widget without an official React Native REST
+flow, and `drive.file` cannot browse arbitrary existing folders. A future Picker
+integration could narrow the scope to `drive.file`. This decision is owner-level
+and flagged for confirmation.
+
+### Folder navigation and target selection (issue #4)
+
+- Creating a Google Drive connection runs OAuth immediately, then presents a
+  **folder browser** that lists the user's Drive folders (`files.list` with
+  `q=mimeType='application/vnd.google-apps.folder' and trashed=false and
+  '<parentId>' in parents`, starting at `'root'`), lets the user enter
+  subfolders, go up, optionally create a folder, and confirm the current folder.
+- The chosen folder is saved as non-secret metadata in the connection
+  `config_json`: `{ targetFolderId, targetFolderName, targetFolderPath }`
+  (folder ids/names are non-secret and allowed in SQLite per
+  [storage.md](storage.md)). OAuth tokens remain in `expo-secure-store`.
+- `status()` reports `ready` only when the app-level client id is configured AND
+  a token exists AND a target folder is set; otherwise `needs_setup`.
+
+### Remote catalog layout (mirrors the issue #2 export archive)
+
+The remote storage uses the SAME structure as the issue #2 Zip export archive so
+the two formats interoperate. For each catalog under the chosen target folder:
+
+```
+<targetFolder>/<catalogId>/manifest.json
+<targetFolder>/<catalogId>/relationships.json
+<targetFolder>/<catalogId>/documents/<documentId>.md
+```
+
+- `manifest.json` uses schema `spiny.catalog-archive.v1`:
+  `{ schema, exportedAt, catalog:{id,title,description,createdAt,updatedAt},
+  settings:{documentCount}, documents:[{ documentId, title, topics, createdAt,
+  updatedAt, deletedAt, linkedDocumentIds, path }] }` where `path` =
+  `documents/<documentId>.md`. Document metadata lives in the manifest; the
+  `.md` files carry only the raw `bodyMarkdown`.
+- `relationships.json` uses schema `spiny.catalog-relationships.v1` and is
+  derived from each manifest entry's `linkedDocumentIds` (source=document,
+  target=linked id, type=`link`, source=`markdown_link`). The provider does not
+  receive relationship rows, so timestamps fall back to the source document's
+  `updatedAt` (best-effort structural parity with #2).
+- Sync manifests additionally carry **tombstones** (entries with `deletedAt` set
+  and no `.md` body) so latest-wins deletions propagate; these remain valid
+  `spiny.catalog-archive.v1` entries.
+
+The schema strings/field names are intentionally identical to the export module
+(`src/export/catalogArchive.ts`). They are re-declared in the sync layer
+(`src/sync/driveLayout.ts`) rather than imported, to keep `src/sync` free of the
+export module's `jszip` runtime dependency; a post-merge DRY-up could extract a
+shared, IO-free schema module.
+
+Provider method mapping (latest-wins preserved):
+
+- `getCatalogManifest` reads `manifest.json` → service `CatalogManifest`.
+- `putCatalogManifest` writes `manifest.json` (full refresh) and `relationships.json`.
+- `putDocument` writes `documents/<id>.md`, then read-modify-writes `manifest.json`
+  to upsert that entry (the sync service does not always call
+  `putCatalogManifest` after each `putDocument`).
+- `getDocument` reads the manifest entry + body `.md` and reconstructs a full
+  `RemoteDocument` (`createdAt` comes from the manifest entry).
+- `deleteDocument` upserts a tombstone entry, deletes the `.md` body, and
+  refreshes `relationships.json`.
+
 Drive operations required:
 
-- List/search files.
+- List/search files and folders.
 - Download file content.
-- Upload file content.
+- Upload file content (multipart create / media `PATCH`).
+- Create folders.
 - Update catalog manifest.
 - Handle token refresh/reconnect.
 
@@ -264,5 +369,7 @@ Do not store large remote document payloads in SecureStore.
 - Google Drive uploads: https://developers.google.com/workspace/drive/api/guides/manage-uploads
 - Google Drive downloads/exports: https://developers.google.com/workspace/drive/api/guides/manage-downloads
 - Google Drive search/list: https://developers.google.com/workspace/drive/api/guides/search-files
+- Google Drive create/populate folders: https://developers.google.com/workspace/drive/api/guides/folder
 - Google Drive app data folder: https://developers.google.com/workspace/drive/api/guides/appdata
 - Google Drive scopes: https://developers.google.com/workspace/drive/api/guides/api-specific-auth
+- Google OAuth 2.0 for Mobile & Desktop Apps (PKCE, public client id): https://developers.google.com/identity/protocols/oauth2/native-app

@@ -1,5 +1,5 @@
 import type { SyncConnection } from '@/db';
-import { GoogleDriveProvider } from './googleDrive';
+import { GoogleDriveProvider, googleDriveConfigFromConnection } from './googleDrive';
 import type { SyncProvider } from './types';
 import { UnavailableProvider } from './unavailableProvider';
 
@@ -7,12 +7,10 @@ import { UnavailableProvider } from './unavailableProvider';
 export function createProvider(connection: SyncConnection): SyncProvider {
   switch (connection.providerType) {
     case 'google_drive':
-      return new GoogleDriveProvider(connection.id, {
-        clientId:
-          typeof connection.config.clientId === 'string'
-            ? connection.config.clientId
-            : undefined,
-      });
+      return new GoogleDriveProvider(
+        connection.id,
+        googleDriveConfigFromConnection(connection.config)
+      );
     case 'sftp':
       return new UnavailableProvider('sftp');
     case 'ftp':

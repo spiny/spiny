@@ -73,11 +73,14 @@ Implications:
 
 Provider credentials and tokens must not be hard-coded into the mobile app. Expo public environment variables are embedded into the bundle and are not secret. React Native security guidance also warns that sensitive keys in app code can be inspected.
 
+No client **secret** is ever bundled. A native OAuth **client id** used with PKCE is a *public* identifier, not a secret (Google "OAuth 2.0 for Mobile & Desktop Apps"), so it may be configured per build. As of issue #4 the Google Drive connector reads a build-configured public client id from `expo.extra.googleDriveClientId` and the user no longer enters a key; "no bundled secrets" still holds because only a public client id (never a secret) is configured.
+
 Implications:
 
 - Store user OAuth tokens and short credentials in `expo-secure-store`.
 - Note: `expo-secure-store` on iOS may reject values above approximately 2048 bytes. Split credentials into separate keys if needed. Larger credential payloads (e.g., SSH private keys) may be stored in the `sync_credentials` SQLite table with application-layer encryption.
-- Do not ship app-owned LLM or storage provider secrets inside the app.
+- Do not ship app-owned LLM or storage provider **secrets** inside the app.
+- A native OAuth *client id* (PKCE, public) may be set in build config; the repo ships `expo.extra.googleDriveClientId` empty for distributors to fill, and the app degrades gracefully when it is unset.
 - AI providers that require app-owned secrets need a backend, short-lived tokens, or a provider-supported mobile-safe auth model.
 
 ## C-08: AI is a roadmap capability with v1 UX only

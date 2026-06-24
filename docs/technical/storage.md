@@ -290,6 +290,7 @@ Required manifest fields:
       "documentId": "...",
       "title": "...",
       "topics": ["..."],
+      "createdAt": "...",
       "updatedAt": "...",
       "deletedAt": null,
       "linkedDocumentIds": ["..."]
@@ -299,6 +300,27 @@ Required manifest fields:
 ```
 
 The manifest is derived from `catalogs`, `catalog_indexes`, and document relationships. It is not a separate local source of truth in v1.
+
+Each manifest document entry carries `createdAt` (added in issue #4). Providers
+that keep document metadata only in the manifest — such as Google Drive — use it
+to reconstruct `RemoteDocument.createdAt` in `getDocument`; it also matches the
+issue #2 export archive entry.
+
+### Google Drive remote layout equals the export archive (issue #4)
+
+The Google Drive connector stores each catalog using the **same structure as the
+issue #2 Zip export archive** so the two formats interoperate:
+
+```
+<targetFolder>/<catalogId>/manifest.json        (schema spiny.catalog-archive.v1)
+<targetFolder>/<catalogId>/relationships.json    (schema spiny.catalog-relationships.v1)
+<targetFolder>/<catalogId>/documents/<id>.md     (raw body_markdown only)
+```
+
+The target folder is chosen by the user via an in-app Drive folder browser and
+saved as non-secret metadata (`targetFolderId`, `targetFolderName`,
+`targetFolderPath`) in the connection `config_json`. See
+[sync.md](sync.md#remote-catalog-layout-mirrors-the-issue-2-export-archive).
 
 ## Catalog export/import archive
 
