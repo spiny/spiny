@@ -22,7 +22,7 @@ Spiny is a quick Markdown capture tool, conceptually close to Obsidian but inten
 - **Mind map** — a navigation graph with multi-select copy/move across documents.
 - **Search** — catalog-scoped, full-text, offline.
 - **Themes and locales** — system/light/dark and full English + French translations.
-- **Optional sync** — Google Drive (OAuth PKCE, user-supplied client id, no bundled secrets); SSH/SFTP and FTP are scaffolded but non-functional in v1.
+- **Optional sync** — Google Drive (OAuth PKCE with a build-configured public client id, no bundled secrets; sign in and navigate your Drive to choose a target folder); SSH/SFTP and FTP are scaffolded but non-functional in v1.
 
 See [`docs/`](docs/README.md) for product and technical documentation.
 

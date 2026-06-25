@@ -34,12 +34,12 @@ Spiny v1 is implemented and validated on a physical Android device (Moto G Play,
 - **Storage**: all required SQLite tables with migrations and repositories; transactional autosave updating `documents`, `catalog_indexes`, and `document_relationships` together; tombstones; dirty flags; navigation-event retention (20 per catalog).
 - **Screens**: home, catalog selector/create/settings, document editor (autosave, Markdown toolbar for bold/italic/H1–H5/rule/document-link/external-link, separate preview, 64 KB byte limit with warning, navigation surface), expanded mind map (multi-select copy/move), catalog-scoped offline search, app settings (theme, locale, providers), and the assistant (non-functional v1 UX).
 - **Theme and locale**: system/light/dark theme and full English and French message catalogs, persisted across restarts.
-- **Sync**: provider abstraction and an in-app catalog sync service (latest-wins, dirty-document processing, exponential backoff at 30s/2min/5min/15min, conflict notifications, status subscriptions). The Google Drive provider uses OAuth PKCE against the Drive `appDataFolder` REST API and is gated on a user-supplied client id (no bundled secrets). SSH/SFTP and FTP are intentionally marked non-functional in v1. Credentials are encrypted (AES-256 via `aes-js`) with the key held in `expo-secure-store`.
+- **Sync**: provider abstraction and an in-app catalog sync service (latest-wins, dirty-document processing, exponential backoff at 30s/2min/5min/15min, conflict notifications, status subscriptions). The Google Drive provider uses OAuth PKCE with a build-configured public client id (`expo.extra.googleDriveClientId`; no bundled secrets) and the restricted `drive` scope so the user can navigate their Drive to pick a target folder; each catalog is stored under that folder using the same layout as the issue #2 export archive (`<catalogId>/manifest.json`, `relationships.json`, `documents/<id>.md`). SSH/SFTP and FTP are intentionally marked non-functional in v1. Credentials are encrypted (AES-256 via `aes-js`) with the key held in `expo-secure-store`.
 - **Markdown**: a custom, dependency-free Markdown renderer (decision recorded in [editor](technical/editor.md)).
 
 Quality gates at the last validation: `tsc --noEmit` reports 0 errors and `expo-doctor` passes 21/21 checks.
 
-**Known limitations**: SSH/SFTP/FTP remain non-functional by design; Google Drive requires a user-provided OAuth client id; a single dev-only LogBox warning originates inside `expo-router` initial-URL handling and is absent from release builds.
+**Known limitations**: SSH/SFTP/FTP remain non-functional by design; Google Drive requires a build-configured public OAuth client id (`expo.extra.googleDriveClientId`, shipped empty) and uses the restricted `drive` scope to allow folder navigation; a single dev-only LogBox warning originates inside `expo-router` initial-URL handling and is absent from release builds.
 
 ## Current decisions
 
@@ -53,7 +53,7 @@ Quality gates at the last validation: `tsc --noEmit` reports 0 errors and `expo-
 | Document navigation | Show a document navigation graph or recently viewed documents with current document highlighted; no document-history back/forward buttons; retain the most recent 20 navigation events per catalog |
 | Document size limit | 64 KB max for `body_markdown` (byte length); UI warns when approaching limit |
 | Mind map | Single/multi-node selection with copy and move actions; populates unvisited relationships from `document_relationships` |
-| Sync providers | Google Drive, SSH/SFTP, FTP in v1 scope; feasibility differs by provider |
+| Sync providers | Google Drive, SSH/SFTP, FTP in v1 scope; feasibility differs by provider. Google Drive uses a build-configured public PKCE client id (no user-entered key), the restricted `drive` scope for folder navigation, and stores each catalog under a user-chosen folder mirroring the issue #2 export archive layout |
 | Sync conflict policy | Bidirectional sync on document open, catalog-wide async sync after provider connect/reconnect, and dirty-document async sync after autosave/app start; latest document wins; user notified when remote overwrites local dirty content |
 | Sync retry | Exponential backoff (30s, 2min, 5min, 15min); permanent failure after 4 consecutive failures per document |
 | Offline behavior | When provider is configured but network unavailable, local document opens immediately; sync deferred |

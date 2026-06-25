@@ -8,6 +8,12 @@ export interface ManifestDocumentEntry {
   documentId: string;
   title: string;
   topics: string[];
+  /**
+   * Document creation timestamp. Lets providers that store metadata only in the
+   * manifest (e.g. Google Drive, issue #4) reconstruct `RemoteDocument.createdAt`
+   * in `getDocument`. Mirrors the issue #2 archive manifest entry.
+   */
+  createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
   linkedDocumentIds: string[];

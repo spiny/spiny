@@ -20,7 +20,9 @@ export function EmptyState({ icon, title, body, actionLabel, onAction }: EmptySt
       <Text style={[styles.title, { color: theme.colors.text }]}>{title}</Text>
       {body ? <Text style={[styles.body, { color: theme.colors.textMuted }]}>{body}</Text> : null}
       {actionLabel && onAction ? (
-        <Button label={actionLabel} onPress={onAction} icon="add" />
+        <View>
+          <Button label={actionLabel} onPress={onAction} icon="add" />
+        </View>
       ) : null}
     </View>
   );

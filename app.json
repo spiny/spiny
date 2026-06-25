@@ -51,6 +51,10 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "googleDriveClientId": "",
+      "googleDriveClientIdNote": "Public Google OAuth *client id* for the Drive sync connector (Android + iOS native client using PKCE). Per Google 'OAuth 2.0 for Mobile & Desktop Apps' this is a PUBLIC identifier, NOT a secret; never place a client SECRET here. Distributors must register their own OAuth client id and set this value — it ships empty. See docs/technical/sync.md."
     }
   }
 }

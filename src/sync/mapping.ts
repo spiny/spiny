@@ -32,6 +32,7 @@ export function buildCatalogManifest(
       documentId: d.id,
       title: d.title,
       topics: d.topics,
+      createdAt: d.createdAt,
       updatedAt: d.updatedAt,
       deletedAt: d.deletedAt,
       linkedDocumentIds: extractLinkedDocumentIds(d.bodyMarkdown),

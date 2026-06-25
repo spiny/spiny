@@ -100,6 +100,31 @@ export async function updateConnection(
   );
 }
 
+/**
+ * Merge a non-secret config patch into a connection's `config_json`.
+ *
+ * Additive companion to `updateConnection` for callers that only need to update
+ * provider metadata (e.g. the Google Drive target folder selected after OAuth,
+ * issue #4) without touching the label. Folder ids/names are non-secret metadata
+ * and belong in SQLite per technical/storage.md; OAuth tokens stay in
+ * `expo-secure-store`. The patch is shallow-merged so unrelated keys are kept.
+ */
+export async function updateConnectionConfig(
+  db: SQLiteDatabase,
+  id: string,
+  configPatch: Record<string, unknown>
+): Promise<void> {
+  const current = await getConnection(db, id);
+  if (!current) return;
+  const merged = { ...current.config, ...configPatch };
+  await db.runAsync(
+    'UPDATE sync_connections SET config_json = ?, updated_at = ? WHERE id = ?',
+    JSON.stringify(merged),
+    nowIso(),
+    id
+  );
+}
+
 /** Hard-delete a connection; cascades to its `sync_credentials` rows and
  * clears the reference from any catalogs that used it. */
 export async function deleteConnection(db: SQLiteDatabase, id: string): Promise<void> {
